@@ -378,8 +378,8 @@
   <button id="play-btn">Pause</button>
   <button id="reset-btn" class="secondary">Reset</button>
   <label>Sim speed:</label>
-  <input type="range" id="speed" min="1" max="20" value="8">
-  <span id="speed-label" style="font-family:monospace;">8x</span>
+  <input type="range" id="speed" min="1" max="20" value="1">
+  <span id="speed-label" style="font-family:monospace;">1x</span>
   <label style="margin-left:auto;">Arrival rate:</label>
   <input type="range" id="arrival" min="2" max="20" value="10">
   <span id="arrival-label" style="font-family:monospace;">10/min</span>
@@ -397,7 +397,7 @@ const state = {
   exits: [],            // array of timestamps (ms, sim time)
   simNow: 0,            // simulated time in ms
   running: true,
-  speed: 8,
+  speed: 1,
   arrivalRate: 10,      // people per simulated minute
   serviceRate: 8,       // people per simulated minute (slightly less, queue grows)
   nextId: 1,
