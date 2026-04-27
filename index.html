@@ -1,0 +1,661 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Queue Wait Time — Live POC</title>
+<style>
+  :root {
+    --brand-blue: #4D6BC6;
+    --navy: #1A1A2E;
+    --slate: #64748B;
+    --slate-light: #94A3B8;
+    --bg: #F8FAFC;
+    --card: #FFFFFF;
+    --border: #E2E8F0;
+    --good: #22C55E;
+    --bad: #EF4444;
+    --warn: #F59E0B;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    margin: 0;
+    background: var(--bg);
+    color: var(--navy);
+    padding: 24px;
+  }
+
+  h1 {
+    font-size: 22px;
+    font-weight: 600;
+    margin: 0 0 4px 0;
+  }
+  .subtitle {
+    color: var(--slate);
+    font-size: 13px;
+    margin-bottom: 24px;
+  }
+
+  .scene {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 32px 60px;
+    margin-bottom: 20px;
+    position: relative;
+    overflow: visible;
+  }
+
+  .scene-grid {
+    display: grid;
+    grid-template-columns: 140px 1fr 140px;
+    gap: 24px;
+    align-items: center;
+  }
+
+  .sensor {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    position: relative;
+  }
+  .sensor-icon {
+    width: 110px;
+    height: 70px;
+    background: linear-gradient(180deg, #EEF2FF 0%, #E0E7FF 100%);
+    border: 2px solid var(--brand-blue);
+    border-radius: 6px;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .sensor-icon::after {
+    content: '';
+    width: 8px;
+    height: 8px;
+    background: var(--brand-blue);
+    border-radius: 50%;
+  }
+  .sensor-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--navy);
+  }
+  .sensor-sublabel {
+    font-size: 10px;
+    color: var(--slate);
+    font-family: monospace;
+  }
+
+  .badge {
+    position: absolute;
+    top: 18px;
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-size: 18px;
+    font-weight: 700;
+    color: white;
+    pointer-events: none;
+    opacity: 0;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.18);
+    z-index: 5;
+  }
+  .badge.entry {
+    background: var(--good);
+    right: calc(100% - 8px);
+    animation: badgePopLeft 3.0s ease-out forwards;
+  }
+  .badge.exit {
+    background: var(--bad);
+    left: calc(100% - 8px);
+    animation: badgePopRight 3.0s ease-out forwards;
+  }
+
+  @keyframes badgePopLeft {
+    0%   { opacity: 0; transform: translateX(20px) scale(0.6); }
+    10%  { opacity: 1; transform: translateX(0) scale(1.15); }
+    20%  { opacity: 1; transform: translateX(-6px) scale(1); }
+    75%  { opacity: 1; transform: translateX(-12px) scale(1); }
+    100% { opacity: 0; transform: translateX(-24px) scale(0.95); }
+  }
+  @keyframes badgePopRight {
+    0%   { opacity: 0; transform: translateX(-20px) scale(0.6); }
+    10%  { opacity: 1; transform: translateX(0) scale(1.15); }
+    20%  { opacity: 1; transform: translateX(6px) scale(1); }
+    75%  { opacity: 1; transform: translateX(12px) scale(1); }
+    100% { opacity: 0; transform: translateX(24px) scale(0.95); }
+  }
+
+  .queue {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    justify-content: flex-end;
+    min-height: 100px;
+    padding: 12px 16px;
+    background: #F1F5F9;
+    border-radius: 8px;
+    border: 1px dashed var(--border);
+  }
+  .queue-empty {
+    color: var(--slate-light);
+    font-size: 12px;
+    font-style: italic;
+    width: 100%;
+    text-align: center;
+  }
+  .person {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--brand-blue);
+    animation: personIn 0.4s ease-out;
+  }
+  .person.leaving {
+    animation: personOut 0.3s ease-in forwards;
+  }
+  @keyframes personIn {
+    from { opacity: 0; transform: scale(0); }
+    to   { opacity: 1; transform: scale(1); }
+  }
+  @keyframes personOut {
+    from { opacity: 1; transform: scale(1); }
+    to   { opacity: 0; transform: scale(0); }
+  }
+
+  .arrow {
+    text-align: center;
+    color: var(--slate-light);
+    font-size: 11px;
+    margin-top: 12px;
+    letter-spacing: 0.5px;
+  }
+
+  .kpis {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+  .kpi {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px 20px;
+  }
+  .kpi-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: var(--slate);
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+  .kpi-value {
+    font-size: 36px;
+    font-weight: 700;
+    color: var(--navy);
+    line-height: 1;
+  }
+  .kpi-unit {
+    font-size: 14px;
+    color: var(--slate);
+    font-weight: 400;
+    margin-left: 4px;
+  }
+  .kpi-endpoint {
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+    font-family: ui-monospace, "SF Mono", monospace;
+    font-size: 10px;
+    color: var(--slate);
+    line-height: 1.4;
+  }
+  .kpi-endpoint .method {
+    color: var(--brand-blue);
+    font-weight: 600;
+  }
+  .kpi.featured {
+    background: linear-gradient(135deg, #F0F4FF 0%, #FFFFFF 100%);
+    border-color: var(--brand-blue);
+  }
+  .kpi.caveat {
+    border-style: dashed;
+  }
+  .kpi-note {
+    font-size: 10px;
+    color: var(--warn);
+    margin-top: 4px;
+    font-style: italic;
+  }
+
+  .chart-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px 20px;
+  }
+  .chart-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--navy);
+    margin-bottom: 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .chart-legend {
+    display: flex;
+    gap: 16px;
+    font-size: 11px;
+    color: var(--slate);
+    font-weight: 400;
+  }
+  .legend-dot {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    margin-right: 4px;
+    vertical-align: middle;
+  }
+  canvas { width: 100%; display: block; }
+
+  .controls {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    margin-top: 20px;
+    padding: 12px 16px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 12px;
+  }
+  .controls label { color: var(--slate); }
+  .controls button {
+    background: var(--brand-blue);
+    color: white;
+    border: none;
+    padding: 6px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 500;
+  }
+  .controls button.secondary {
+    background: white;
+    color: var(--navy);
+    border: 1px solid var(--border);
+  }
+  .controls input[type=range] { width: 120px; }
+
+  .footer-note {
+    margin-top: 16px;
+    font-size: 11px;
+    color: var(--slate);
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<h1>Queue Wait Time — Live POC</h1>
+<div class="subtitle">Two doorways. Crossing events stream in live; throughput drives the wait estimate.</div>
+
+<div class="scene">
+  <div class="scene-grid">
+    <div class="sensor">
+      <div class="sensor-icon" id="entry-sensor"></div>
+      <div class="sensor-label">Line Entry</div>
+      <div class="sensor-sublabel">spc_line_entry</div>
+    </div>
+
+    <div>
+      <div class="queue" id="queue">
+        <span class="queue-empty">queue empty</span>
+      </div>
+      <div class="arrow">→ direction of flow →</div>
+    </div>
+
+    <div class="sensor">
+      <div class="sensor-icon" id="exit-sensor"></div>
+      <div class="sensor-label">Service Point</div>
+      <div class="sensor-sublabel">spc_line_exit</div>
+    </div>
+  </div>
+</div>
+
+<div class="kpis">
+  <div class="kpi caveat">
+    <div class="kpi-label">Current Queue Length</div>
+    <div class="kpi-value"><span id="kpi-queue">0</span><span class="kpi-unit">people</span></div>
+    <div class="kpi-note">approximate, drifts over time</div>
+    <div class="kpi-endpoint">
+      <span class="method">GET</span> /v3/doorways/{id}/events<br>
+      count entries − count exits
+    </div>
+  </div>
+
+  <div class="kpi featured">
+    <div class="kpi-label">Throughput (rolling 5 min)</div>
+    <div class="kpi-value"><span id="kpi-throughput">0.0</span><span class="kpi-unit">/min</span></div>
+    <div class="kpi-endpoint">
+      <span class="method">GET</span> /v3/doorways/{id}/events<br>
+      exit events in last 5 min ÷ 5
+    </div>
+  </div>
+
+  <div class="kpi featured">
+    <div class="kpi-label">Estimated Wait if You Joined Now</div>
+    <div class="kpi-value"><span id="kpi-wait">0.0</span><span class="kpi-unit">min</span></div>
+    <div class="kpi-endpoint">
+      Little's Law: queue ÷ throughput<br>
+      derived, no extra API call
+    </div>
+  </div>
+</div>
+
+<div class="chart-card">
+  <div class="chart-title">
+    <span>Last 30 minutes — entries vs exits per minute</span>
+    <div class="chart-legend">
+      <span><span class="legend-dot" style="background:#22C55E"></span>entries</span>
+      <span><span class="legend-dot" style="background:#EF4444"></span>exits</span>
+      <span><span class="legend-dot" style="background:#4D6BC6"></span>queue length</span>
+    </div>
+  </div>
+  <canvas id="chart" height="160"></canvas>
+</div>
+
+<div class="controls">
+  <button id="play-btn">Pause</button>
+  <button id="reset-btn" class="secondary">Reset</button>
+  <label>Sim speed:</label>
+  <input type="range" id="speed" min="1" max="20" value="8">
+  <span id="speed-label" style="font-family:monospace;">8x</span>
+  <label style="margin-left:auto;">Arrival rate:</label>
+  <input type="range" id="arrival" min="2" max="20" value="10">
+  <span id="arrival-label" style="font-family:monospace;">10/min</span>
+</div>
+
+<div class="footer-note">
+  Synthetic data. In production, swap the simulator for a poll (or websocket stream) of /v3/doorways/{id}/events.
+</div>
+
+<script>
+// ---------- State ----------
+const state = {
+  queue: [],            // array of { id, enteredAt }
+  entries: [],          // array of timestamps (ms, sim time)
+  exits: [],            // array of timestamps (ms, sim time)
+  simNow: 0,            // simulated time in ms
+  running: true,
+  speed: 8,
+  arrivalRate: 10,      // people per simulated minute
+  serviceRate: 8,       // people per simulated minute (slightly less, queue grows)
+  nextId: 1,
+  nextArrival: 0,
+  nextService: 0,
+};
+
+// ---------- DOM ----------
+const queueEl = document.getElementById('queue');
+const entrySensorEl = document.getElementById('entry-sensor');
+const exitSensorEl = document.getElementById('exit-sensor');
+const kpiQueueEl = document.getElementById('kpi-queue');
+const kpiThroughputEl = document.getElementById('kpi-throughput');
+const kpiWaitEl = document.getElementById('kpi-wait');
+const playBtn = document.getElementById('play-btn');
+const resetBtn = document.getElementById('reset-btn');
+const speedSlider = document.getElementById('speed');
+const speedLabel = document.getElementById('speed-label');
+const arrivalSlider = document.getElementById('arrival');
+const arrivalLabel = document.getElementById('arrival-label');
+const canvas = document.getElementById('chart');
+const ctx = canvas.getContext('2d');
+
+// ---------- Simulator ----------
+function poissonInterval(ratePerMin) {
+  // returns ms until next event (sim time)
+  const ratePerMs = ratePerMin / 60000;
+  return -Math.log(1 - Math.random()) / ratePerMs;
+}
+
+function scheduleNext() {
+  state.nextArrival = state.simNow + poissonInterval(state.arrivalRate);
+  state.nextService = state.simNow + poissonInterval(state.serviceRate);
+}
+
+function flashBadge(parentEl, type, count) {
+  const b = document.createElement('div');
+  b.className = 'badge ' + type;
+  b.textContent = (type === 'entry' ? '+' : '−') + count;
+  parentEl.appendChild(b);
+  setTimeout(() => b.remove(), 3100);
+}
+
+function addPerson(id) {
+  // remove "empty" placeholder
+  const empty = queueEl.querySelector('.queue-empty');
+  if (empty) empty.remove();
+  const dot = document.createElement('div');
+  dot.className = 'person';
+  dot.dataset.id = id;
+  queueEl.appendChild(dot);
+}
+
+function removePerson(id) {
+  const dot = queueEl.querySelector(`.person[data-id="${id}"]`);
+  if (dot) {
+    dot.classList.add('leaving');
+    setTimeout(() => {
+      dot.remove();
+      if (queueEl.children.length === 0) {
+        const empty = document.createElement('span');
+        empty.className = 'queue-empty';
+        empty.textContent = 'queue empty';
+        queueEl.appendChild(empty);
+      }
+    }, 300);
+  }
+}
+
+function entryEvent() {
+  const id = state.nextId++;
+  state.queue.push({ id, enteredAt: state.simNow });
+  state.entries.push(state.simNow);
+  addPerson(id);
+  flashBadge(entrySensorEl.parentElement, 'entry', 1);
+}
+
+function exitEvent() {
+  if (state.queue.length === 0) return; // no one to serve
+  const person = state.queue.shift();
+  state.exits.push(state.simNow);
+  removePerson(person.id);
+  flashBadge(exitSensorEl.parentElement, 'exit', 1);
+}
+
+// ---------- Metrics ----------
+function computeMetrics() {
+  // Trim to last 30 min for window stats
+  const windowMs = 30 * 60 * 1000;
+  const cutoff = state.simNow - windowMs;
+  state.entries = state.entries.filter(t => t > cutoff);
+  state.exits = state.exits.filter(t => t > cutoff);
+
+  // Throughput: exits in last 5 min / 5
+  const fiveMinAgo = state.simNow - 5 * 60 * 1000;
+  const recentExits = state.exits.filter(t => t > fiveMinAgo).length;
+  const throughput = recentExits / 5; // people per min
+
+  const queueLen = state.queue.length;
+  const wait = throughput > 0 ? queueLen / throughput : 0;
+
+  return { queueLen, throughput, wait };
+}
+
+function renderKpis() {
+  const { queueLen, throughput, wait } = computeMetrics();
+  kpiQueueEl.textContent = queueLen;
+  kpiThroughputEl.textContent = throughput.toFixed(1);
+  kpiWaitEl.textContent = throughput > 0 ? wait.toFixed(1) : '—';
+}
+
+// ---------- Chart ----------
+function renderChart() {
+  const w = canvas.width = canvas.offsetWidth * window.devicePixelRatio;
+  const h = canvas.height = 160 * window.devicePixelRatio;
+  ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+  const W = canvas.offsetWidth;
+  const H = 160;
+  ctx.clearRect(0, 0, W, H);
+
+  // Build per-minute buckets for last 30 min
+  const buckets = 30;
+  const windowMs = 30 * 60 * 1000;
+  const start = state.simNow - windowMs;
+  const entryBuckets = new Array(buckets).fill(0);
+  const exitBuckets = new Array(buckets).fill(0);
+
+  for (const t of state.entries) {
+    const idx = Math.floor((t - start) / 60000);
+    if (idx >= 0 && idx < buckets) entryBuckets[idx]++;
+  }
+  for (const t of state.exits) {
+    const idx = Math.floor((t - start) / 60000);
+    if (idx >= 0 && idx < buckets) exitBuckets[idx]++;
+  }
+
+  // Queue length over time (cumulative entries - exits)
+  const queueSeries = [];
+  let runningQueue = 0;
+  // approximate starting queue: current - net flow over window
+  const totalEntries = entryBuckets.reduce((a,b)=>a+b,0);
+  const totalExits = exitBuckets.reduce((a,b)=>a+b,0);
+  runningQueue = state.queue.length - (totalEntries - totalExits);
+  if (runningQueue < 0) runningQueue = 0;
+  for (let i = 0; i < buckets; i++) {
+    runningQueue += entryBuckets[i] - exitBuckets[i];
+    if (runningQueue < 0) runningQueue = 0;
+    queueSeries.push(runningQueue);
+  }
+
+  const maxBar = Math.max(1, ...entryBuckets, ...exitBuckets);
+  const maxQueue = Math.max(1, ...queueSeries);
+
+  const padL = 30, padR = 10, padT = 10, padB = 24;
+  const plotW = W - padL - padR;
+  const plotH = H - padT - padB;
+  const barW = plotW / buckets;
+
+  // Y axis label
+  ctx.fillStyle = '#94A3B8';
+  ctx.font = '10px -apple-system, sans-serif';
+  ctx.textAlign = 'right';
+  ctx.fillText(maxBar.toString(), padL - 4, padT + 8);
+  ctx.fillText('0', padL - 4, padT + plotH);
+
+  // Bars: entries (green) and exits (red), side by side
+  for (let i = 0; i < buckets; i++) {
+    const x = padL + i * barW;
+    const eH = (entryBuckets[i] / maxBar) * plotH;
+    const xH = (exitBuckets[i] / maxBar) * plotH;
+    ctx.fillStyle = '#22C55E';
+    ctx.fillRect(x + 1, padT + plotH - eH, barW * 0.4, eH);
+    ctx.fillStyle = '#EF4444';
+    ctx.fillRect(x + 1 + barW * 0.45, padT + plotH - xH, barW * 0.4, xH);
+  }
+
+  // Queue length line
+  ctx.strokeStyle = '#4D6BC6';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  for (let i = 0; i < buckets; i++) {
+    const x = padL + i * barW + barW / 2;
+    const y = padT + plotH - (queueSeries[i] / maxQueue) * plotH;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+
+  // X axis labels
+  ctx.fillStyle = '#94A3B8';
+  ctx.textAlign = 'center';
+  ctx.fillText('-30 min', padL + barW * 0.5, H - 6);
+  ctx.fillText('-15 min', padL + plotW * 0.5, H - 6);
+  ctx.fillText('now', padL + plotW - 10, H - 6);
+}
+
+// ---------- Loop ----------
+let lastWall = performance.now();
+function tick(wallNow) {
+  const dt = wallNow - lastWall;
+  lastWall = wallNow;
+
+  if (state.running) {
+    state.simNow += dt * state.speed;
+
+    // process events scheduled within new sim window
+    let safety = 0;
+    while ((state.nextArrival <= state.simNow || state.nextService <= state.simNow) && safety < 50) {
+      if (state.nextArrival <= state.nextService) {
+        state.simNow = state.nextArrival;
+        entryEvent();
+        state.nextArrival = state.simNow + poissonInterval(state.arrivalRate);
+      } else {
+        state.simNow = state.nextService;
+        exitEvent();
+        state.nextService = state.simNow + poissonInterval(state.serviceRate);
+      }
+      safety++;
+    }
+
+    renderKpis();
+    renderChart();
+  }
+
+  requestAnimationFrame(tick);
+}
+
+// ---------- Wire controls ----------
+playBtn.addEventListener('click', () => {
+  state.running = !state.running;
+  playBtn.textContent = state.running ? 'Pause' : 'Play';
+});
+resetBtn.addEventListener('click', () => {
+  state.queue = [];
+  state.entries = [];
+  state.exits = [];
+  state.simNow = 0;
+  state.nextId = 1;
+  scheduleNext();
+  queueEl.innerHTML = '<span class="queue-empty">queue empty</span>';
+  renderKpis();
+  renderChart();
+});
+speedSlider.addEventListener('input', e => {
+  state.speed = +e.target.value;
+  speedLabel.textContent = state.speed + 'x';
+});
+arrivalSlider.addEventListener('input', e => {
+  state.arrivalRate = +e.target.value;
+  arrivalLabel.textContent = state.arrivalRate + '/min';
+  // Keep service slightly slower than arrival so queue can build
+  state.serviceRate = Math.max(2, state.arrivalRate - 2);
+});
+
+// ---------- Boot ----------
+scheduleNext();
+requestAnimationFrame(tick);
+</script>
+
+</body>
+</html>
